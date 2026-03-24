@@ -1,0 +1,9 @@
+node_modules/
+build/
+dist/
+server-run.mjs
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
