@@ -23,7 +23,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Language, translations } from './translations';
 
 // --- Constants ---
-const API_URL = String(import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+const API_URL = (() => {
+  const raw = String(import.meta.env.VITE_API_URL ?? "").trim();
+  if (!raw) return "";
+  // VITE_API_URL doit pointer sur la base du backend (sans /api à la fin).
+  // On normalise pour éviter les doubles préfixes (ex: .../api/api/...).
+  let u = raw.replace(/\/+$/, "");
+  u = u.replace(/\/api$/i, "");
+  return u;
+})();
 const MAX_PROMO_CHARS = 2000;
 const MIN_PROMO_CHARS = 20;
 const MAX_MEDIA_FILES = 10;
@@ -293,7 +301,7 @@ export default function App() {
   useEffect(() => {
     const checkApi = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/health`);
+        const res = await fetch(`${API_URL}/health`);
         if (res.ok) {
           setApiStatus('online');
         } else {
@@ -312,7 +320,7 @@ export default function App() {
 
   const pollJobStatus = async (jobId: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/status/${jobId}`);
+      const response = await fetch(`${API_URL}/status/${jobId}`);
       if (!response.ok) {
         console.warn(`Status check failed with status: ${response.status}`);
         return;
@@ -359,7 +367,7 @@ export default function App() {
         }
 
         try {
-          const videoRes = await fetch(`${API_URL}/api/download/${jobId}`);
+          const videoRes = await fetch(`${API_URL}/download/${jobId}`);
           const contentType = videoRes.headers.get('content-type');
           
           if (videoRes.ok && contentType && contentType.includes('video')) {
@@ -467,7 +475,7 @@ export default function App() {
     setStatus(null);
 
     try {
-      const targetPath = '/api/generate';
+      const targetPath = '/generate';
       console.log(`Tentative d'envoi de la requête à ${API_URL}${targetPath}...`);
       
       const formData = new FormData();
@@ -550,7 +558,7 @@ export default function App() {
       fd.append("language", copyLanguage);
       fd.append("length", textLengthMode === "long" ? "long" : "court");
 
-      const endpoint = "/api/generate-copy";
+      const endpoint = "/generate-copy";
       const res = await fetch(`${API_URL}${endpoint}`, { method: "POST", body: fd });
       const parsed = await parseApiResponse(res);
       const data = parsed.data ?? {};
