@@ -23,7 +23,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Language, translations } from './translations';
 
 // --- Constants ---
-const API_URL = window.location.origin;
+const API_URL = String(import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 const MAX_PROMO_CHARS = 2000;
 const MIN_PROMO_CHARS = 20;
 const MAX_MEDIA_FILES = 10;
