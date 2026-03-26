@@ -35,6 +35,26 @@ const API_URL = (() => {
 const MAX_PROMO_CHARS = 2000;
 const MIN_PROMO_CHARS = 20;
 const MAX_MEDIA_FILES = 10;
+const TUNISIAN_VOICES = ["salim", "tounsia"] as const;
+
+function normalizeLanguage(input: string): "tn" | "fr" | "ar" | "en" {
+  if (input === "tn" || input === "ar" || input === "en") return input;
+  return "fr";
+}
+
+function looksLikeSecretVoiceId(input: string): boolean {
+  const v = input.trim();
+  if (!v) return false;
+  // ElevenLabs-like IDs are typically long opaque tokens; block them from frontend payloads.
+  return /^[A-Za-z0-9_-]{18,}$/.test(v);
+}
+
+function resolveVoiceCode(params: { language: "tn" | "fr" | "ar" | "en"; userSelectedVoice?: string }): string | null {
+  const userSelectedVoice = params.userSelectedVoice?.trim() ?? "";
+  if (userSelectedVoice) return userSelectedVoice;
+  if (params.language === "tn") return "salim";
+  return null;
+}
 
 function polishPromoText(s: string): string {
   const out = s.trim().replace(/\s+/g, " ");
@@ -487,7 +507,20 @@ export default function App() {
       formData.append('music_style', musicStyle);
       formData.append('subtitle_style', subtitleStyleApi);
       if (subtitleModeApi) formData.append('subtitle_mode', subtitleModeApi);
-      if (voiceCode) formData.append('voice_code', voiceCode);
+
+      const normalizedLanguage = normalizeLanguage(copyLanguage);
+      formData.append("language", normalizedLanguage);
+
+      if (voiceCode && looksLikeSecretVoiceId(voiceCode)) {
+        setStatus({ type: "error", message: "Code voix invalide: utilisez un code lisible (ex: salim), jamais un ID brut." });
+        return;
+      }
+
+      const resolvedVoiceCode = resolveVoiceCode({
+        language: normalizedLanguage,
+        userSelectedVoice: voiceCode,
+      });
+      if (resolvedVoiceCode) formData.append("voice_code", resolvedVoiceCode);
 
       const response = await fetch(`${API_URL}${targetPath}`, {
         method: 'POST',
@@ -1118,6 +1151,12 @@ export default function App() {
                 className={nativeSelectClass}
               >
                 <option value="">{voiceOptions.default}</option>
+                {copyLanguage === "tn" && (
+                  <>
+                    <option value={TUNISIAN_VOICES[0]}>Salim</option>
+                    <option value={TUNISIAN_VOICES[1]}>Tounsia</option>
+                  </>
+                )}
                 <option value="FEMME_EMIRATE">{voiceOptions.femme_emirate}</option>
                 <option value="HOMME_SAUDI">{voiceOptions.homme_saudi}</option>
               </select>
