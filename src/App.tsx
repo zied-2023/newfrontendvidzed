@@ -37,6 +37,13 @@ const MIN_PROMO_CHARS = 20;
 const MAX_MEDIA_FILES = 10;
 const TUNISIAN_VOICES = ["salim", "tounsia"] as const;
 
+function normalizeVoiceCodeForBackend(input: string): string {
+  const v = input.trim().toLowerCase();
+  // Render env key is configured as SALIME; keep UI label "salim" but send backend code "salime".
+  if (v === "salim") return "salime";
+  return v;
+}
+
 function normalizeLanguage(input: string): "tn" | "fr" | "ar" | "en" {
   if (input === "tn" || input === "ar" || input === "en") return input;
   return "fr";
@@ -51,8 +58,8 @@ function looksLikeSecretVoiceId(input: string): boolean {
 
 function resolveVoiceCode(params: { language: "tn" | "fr" | "ar" | "en"; userSelectedVoice?: string }): string | null {
   const userSelectedVoice = params.userSelectedVoice?.trim() ?? "";
-  if (userSelectedVoice) return userSelectedVoice;
-  if (params.language === "tn") return "salim";
+  if (userSelectedVoice) return normalizeVoiceCodeForBackend(userSelectedVoice);
+  if (params.language === "tn") return "salime";
   return null;
 }
 
