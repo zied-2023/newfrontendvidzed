@@ -37,13 +37,6 @@ const MIN_PROMO_CHARS = 20;
 const MAX_MEDIA_FILES = 10;
 const TUNISIAN_VOICES = ["salim", "tounsia"] as const;
 
-function normalizeVoiceCodeForBackend(input: string): string {
-  const v = input.trim().toLowerCase();
-  // Render env key is configured as SALIME; keep UI label "salim" but send backend code "salime".
-  if (v === "salim") return "salime";
-  return v;
-}
-
 function normalizeLanguage(input: string): "tn" | "fr" | "ar" | "en" {
   if (input === "tn" || input === "ar" || input === "en") return input;
   return "fr";
@@ -54,13 +47,6 @@ function looksLikeSecretVoiceId(input: string): boolean {
   if (!v) return false;
   // ElevenLabs-like IDs are typically long opaque tokens; block them from frontend payloads.
   return /^[A-Za-z0-9_-]{18,}$/.test(v);
-}
-
-function resolveVoiceCode(params: { language: "tn" | "fr" | "ar" | "en"; userSelectedVoice?: string }): string | null {
-  const userSelectedVoice = params.userSelectedVoice?.trim() ?? "";
-  if (userSelectedVoice) return normalizeVoiceCodeForBackend(userSelectedVoice);
-  if (params.language === "tn") return "salime";
-  return null;
 }
 
 function polishPromoText(s: string): string {
@@ -256,7 +242,7 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [promoText, setPromoText] = useState("");
   const [businessType, setBusinessType] = useState<"restaurant" | "cafe" | "immobilier">("restaurant");
-  const [copyLanguage, setCopyLanguage] = useState<"fr" | "tn" | "ar">("fr");
+  const [copyLanguage, setCopyLanguage] = useState<"fr" | "tn" | "ar" | "en">("fr");
   const [businessName, setBusinessName] = useState("");
   const [city, setCity] = useState("");
   const [offer, setOffer] = useState("");
@@ -522,12 +508,9 @@ export default function App() {
         setStatus({ type: "error", message: "Code voix invalide: utilisez un code lisible (ex: salim), jamais un ID brut." });
         return;
       }
-
-      const resolvedVoiceCode = resolveVoiceCode({
-        language: normalizedLanguage,
-        userSelectedVoice: voiceCode,
-      });
-      if (resolvedVoiceCode) formData.append("voice_code", resolvedVoiceCode);
+      // Auto mode: do not send voice_code so backend auto-selects from language.
+      const manualVoiceCode = voiceCode.trim();
+      if (manualVoiceCode) formData.append("voice_code", manualVoiceCode);
 
       const response = await fetch(`${API_URL}${targetPath}`, {
         method: 'POST',
@@ -649,9 +632,10 @@ export default function App() {
     setImproveLoading(true);
     let improved = currentText.replace(/\s+/g, " ").replace(/,\s*,/g, ", ").trim();
     const ctaFr = " Contactez-nous maintenant.";
+    const ctaEn = " Contact us now.";
     const ctaAr = " تواصلوا معنا الان.";
     const ctaTn = " Kallemna tawa.";
-    const cta = copyLanguage === "ar" ? ctaAr : copyLanguage === "tn" ? ctaTn : ctaFr;
+    const cta = copyLanguage === "ar" ? ctaAr : copyLanguage === "tn" ? ctaTn : copyLanguage === "en" ? ctaEn : ctaFr;
     improved = improved.endsWith(".") ? improved + cta : improved + "." + cta;
     setPromoText(polishPromoText(improved).slice(0, MAX_PROMO_CHARS));
     setCopySuccess(t.improveDone);
@@ -802,6 +786,7 @@ export default function App() {
                 <option value="fr">{copyLangOpts.fr}</option>
                 <option value="tn">{copyLangOpts.tn}</option>
                 <option value="ar">{copyLangOpts.ar}</option>
+                <option value="en">{copyLangOpts.en}</option>
               </select>
             </div>
             <div>
@@ -1167,6 +1152,9 @@ export default function App() {
                 <option value="FEMME_EMIRATE">{voiceOptions.femme_emirate}</option>
                 <option value="HOMME_SAUDI">{voiceOptions.homme_saudi}</option>
               </select>
+              <p className="text-[11px] text-coffee/45 mt-2">
+                La langue choisit la voix automatiquement si aucune voix manuelle n&apos;est selectionnee.
+              </p>
             </div>
             <div>
               <label htmlFor="subtitle_mode" className={fieldLabelClass}>
