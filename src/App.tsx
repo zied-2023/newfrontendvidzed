@@ -49,6 +49,31 @@ function looksLikeSecretVoiceId(input: string): boolean {
   return /^[A-Za-z0-9_-]{18,}$/.test(v);
 }
 
+/** API expects readable lowercase codes (e.g. femme_emirate, salim). */
+function normalizeReadableVoiceCode(input: string): string {
+  return input.trim().toLowerCase();
+}
+
+function isTunisianVoiceCode(code: string): boolean {
+  const c = normalizeReadableVoiceCode(code);
+  return c === "salim" || c === "tounsia";
+}
+
+function shouldDebugGenerateFormData(): boolean {
+  if (import.meta.env.DEV) return true;
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("debugVoice") === "1";
+}
+
+function logGenerateFormDataDebug(fd: FormData): void {
+  const rows: Array<[string, string]> = [];
+  for (const [key, value] of fd.entries()) {
+    if (value instanceof File) rows.push([key, `(file) ${value.name}`]);
+    else rows.push([key, String(value)]);
+  }
+  console.log("[generate FormData]", rows);
+}
+
 function polishPromoText(s: string): string {
   const out = s.trim().replace(/\s+/g, " ");
   if (!out) return out;
@@ -272,6 +297,11 @@ export default function App() {
     localStorage.setItem("vidzed_lang", lang);
     document.documentElement.lang = lang;
   }, [lang]);
+
+  // Avoid stale manual voice when switching generation language (auto = empty voice_code).
+  useEffect(() => {
+    setVoiceCode("");
+  }, [copyLanguage]);
 
   const promoPlaceholder = useMemo(() => {
     if (businessType === "cafe") return t.placeholderCafe;
@@ -508,9 +538,24 @@ export default function App() {
         setStatus({ type: "error", message: "Code voix invalide: utilisez un code lisible (ex: salim), jamais un ID brut." });
         return;
       }
-      // Auto mode: do not send voice_code so backend auto-selects from language.
-      const manualVoiceCode = voiceCode.trim();
-      if (manualVoiceCode) formData.append("voice_code", manualVoiceCode);
+      // Manual only: never append voice_code in auto mode (empty = server picks by language).
+      const manualVoiceCode = normalizeReadableVoiceCode(voiceCode);
+      if (manualVoiceCode) {
+        if (normalizedLanguage === "ar" && isTunisianVoiceCode(manualVoiceCode)) {
+          const ok = window.confirm(
+            "Vous avez choisi une voix tunisienne (Derja) alors que la langue est arabe fusha. Continuer avec ce choix manuel ?"
+          );
+          if (!ok) {
+            setIsGenerating(false);
+            return;
+          }
+        }
+        formData.append("voice_code", manualVoiceCode);
+      }
+
+      if (shouldDebugGenerateFormData()) {
+        logGenerateFormDataDebug(formData);
+      }
 
       const response = await fetch(`${API_URL}${targetPath}`, {
         method: 'POST',
@@ -1143,14 +1188,14 @@ export default function App() {
                 className={nativeSelectClass}
               >
                 <option value="">{voiceOptions.default}</option>
-                {copyLanguage === "tn" && (
+                {(copyLanguage === "tn" || copyLanguage === "ar") && (
                   <>
                     <option value={TUNISIAN_VOICES[0]}>Salim</option>
                     <option value={TUNISIAN_VOICES[1]}>Tounsia</option>
                   </>
                 )}
-                <option value="FEMME_EMIRATE">{voiceOptions.femme_emirate}</option>
-                <option value="HOMME_SAUDI">{voiceOptions.homme_saudi}</option>
+                <option value="femme_emirate">{voiceOptions.femme_emirate}</option>
+                <option value="homme_saudi">{voiceOptions.homme_saudi}</option>
               </select>
               <p className="text-[11px] text-coffee/45 mt-2">
                 La langue choisit la voix automatiquement si aucune voix manuelle n&apos;est selectionnee.
