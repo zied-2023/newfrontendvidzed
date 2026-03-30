@@ -17,7 +17,8 @@ import {
   Coffee,
   Download,
   Copy,
-  Loader2
+  Loader2,
+  Music
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Language, translations } from './translations';
@@ -35,6 +36,11 @@ const API_URL = (() => {
 const MAX_PROMO_CHARS = 2000;
 const MIN_PROMO_CHARS = 20;
 const MAX_MEDIA_FILES = 10;
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+
+function isAudioFile(f: File): boolean {
+  return f.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(f.name);
+}
 const TUNISIAN_VOICES = ["salim", "tounsia"] as const;
 
 function normalizeLanguage(input: string): "tn" | "fr" | "ar" | "en" {
@@ -265,6 +271,9 @@ export default function App() {
   const voiceOptions = t.voiceOptions ?? translations.fr.voiceOptions;
 
   const [files, setFiles] = useState<File[]>([]);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioFileError, setAudioFileError] = useState<string | null>(null);
+  const [isDraggingAudio, setIsDraggingAudio] = useState(false);
   const [promoText, setPromoText] = useState("");
   const [businessType, setBusinessType] = useState<"restaurant" | "cafe" | "immobilier">("restaurant");
   const [copyLanguage, setCopyLanguage] = useState<"fr" | "tn" | "ar" | "en">("fr");
@@ -310,6 +319,7 @@ export default function App() {
   }, [businessType, lang, t]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -323,10 +333,91 @@ export default function App() {
     return () => previewUrls.forEach((u) => URL.revokeObjectURL(u));
   }, [previewUrls]);
 
+  const audioPreviewUrl = useMemo(() => {
+    if (!audioFile) return null;
+    return URL.createObjectURL(audioFile);
+  }, [audioFile]);
+
+  useEffect(() => {
+    return () => {
+      if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
+    };
+  }, [audioPreviewUrl]);
+
+  const applyAudioFile = (f: File) => {
+    setAudioFileError(null);
+    if (!isAudioFile(f)) {
+      setAudioFile(null);
+      setAudioFileError(t.audioErrorFormat);
+      if (audioInputRef.current) audioInputRef.current.value = "";
+      return;
+    }
+    if (f.size > MAX_AUDIO_BYTES) {
+      setAudioFile(null);
+      setAudioFileError(t.audioErrorSize);
+      if (audioInputRef.current) audioInputRef.current.value = "";
+      return;
+    }
+    setAudioFile(f);
+  };
+
+  const onAudioInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) {
+      setAudioFile(null);
+      setAudioFileError(null);
+      return;
+    }
+    applyAudioFile(f);
+  };
+
+  const onAudioDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingAudio(true);
+  };
+
+  const onAudioDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingAudio(false);
+  };
+
+  const onAudioDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingAudio(false);
+    const list = Array.from(e.dataTransfer.files);
+    const f = list.find(isAudioFile);
+    if (f) {
+      applyAudioFile(f);
+      return;
+    }
+    if (list.length > 0) {
+      setAudioFile(null);
+      setAudioFileError(t.audioErrorFormat);
+    }
+  };
+
+  const clearAudioSelection = () => {
+    setAudioFile(null);
+    setAudioFileError(null);
+    if (audioInputRef.current) audioInputRef.current.value = "";
+  };
+
   const canSubmit =
     files.length > 0 &&
+    audioFile !== null &&
     promoText.trim().length >= MIN_PROMO_CHARS &&
     apiStatus !== "offline";
+
+  const submitDisabledReason = (): string | undefined => {
+    if (files.length === 0) return t.validationMedia;
+    if (!audioFile) return t.validationAudio;
+    if (promoText.trim().length < MIN_PROMO_CHARS) return t.validationText;
+    if (apiStatus === "offline") return t.apiOffline;
+    return undefined;
+  };
 
   const statusStepLabel = (() => {
     if (status?.type === "error") return "";
@@ -1117,6 +1208,76 @@ export default function App() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          <div
+            role="region"
+            aria-label={t.promoAudio}
+            className="mt-4 pt-4 border-t border-terracotta/10"
+            onDragOver={onAudioDragOver}
+            onDragLeave={onAudioDragLeave}
+            onDrop={onAudioDrop}
+          >
+            <Label icon={Music}>{t.promoAudio}</Label>
+            <p className="text-[11px] text-coffee/45 mb-3 leading-snug">{t.audioHelper}</p>
+            <label htmlFor="audioFile" className="sr-only">
+              {t.promoAudio}
+            </label>
+            <input
+              id="audioFile"
+              type="file"
+              accept=".mp3,.wav,audio/*"
+              className="hidden"
+              ref={audioInputRef}
+              onChange={onAudioInputChange}
+              aria-invalid={audioFileError ? true : undefined}
+            />
+            <div
+              className={`
+                rounded-xl border border-dashed p-4 transition-colors
+                ${isDraggingAudio ? "border-terracotta bg-terracotta/10" : "border-terracotta/20 bg-cream/5"}
+              `}
+            >
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => audioInputRef.current?.click()}
+                  className="inline-flex items-center gap-2 px-6 py-2 bg-cream text-coffee border border-coffee/10 rounded-full text-sm font-medium hover:bg-white transition-colors"
+                  aria-label={t.uploadAudio}
+                >
+                  <Upload size={16} className="text-terracotta shrink-0" aria-hidden />
+                  {t.uploadAudio}
+                </button>
+                {audioFile && (
+                  <button
+                    type="button"
+                    onClick={clearAudioSelection}
+                    className="text-sm text-terracotta hover:underline"
+                  >
+                    {t.clearAudio}
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-coffee/50 mt-3">{t.audioDropHint}</p>
+              {audioFile && (
+                <p className="text-sm text-coffee/75 mt-2 truncate" title={audioFile.name}>
+                  {audioFile.name}
+                </p>
+              )}
+              {audioPreviewUrl && (
+                <audio
+                  src={audioPreviewUrl}
+                  controls
+                  className="mt-3 w-full rounded-lg"
+                  aria-label={audioFile?.name ?? t.promoAudio}
+                />
+              )}
+              {audioFileError && (
+                <p className="text-sm text-red-700/90 mt-2" role="alert">
+                  {audioFileError}
+                </p>
+              )}
+            </div>
+          </div>
         </Card>
 
         <details className="group rounded-2xl border border-terracotta/15 bg-caramel shadow-xl overflow-hidden">
@@ -1375,15 +1536,7 @@ export default function App() {
             whileTap={!canSubmit || isGenerating ? {} : { scale: 0.98 }}
             onClick={handleGenerate}
             disabled={!canSubmit || isGenerating}
-            title={
-              !canSubmit
-                ? files.length === 0
-                  ? t.validationMedia
-                  : promoText.trim().length < MIN_PROMO_CHARS
-                    ? t.validationText
-                    : t.apiOffline
-                : undefined
-            }
+            title={isGenerating ? undefined : !canSubmit ? submitDisabledReason() : undefined}
             className={`
               relative group overflow-hidden
               px-12 py-5 rounded-full

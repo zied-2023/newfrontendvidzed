@@ -19,6 +19,10 @@ async function loadTailwindVitePlugin() {
 }
 
 const upload = multer({ dest: "uploads/" });
+const GENERATE_UPLOAD = upload.fields([
+  { name: "media", maxCount: 10 },
+  { name: "audio", maxCount: 1 },
+]);
 const EXTERNAL_API_URL = "https://video1-agent-api.onrender.com";
 
 // Ensure uploads directory exists
@@ -82,9 +86,17 @@ async function startServer() {
   app.post("/generate-copy", upload.none(), forwardGenerateCopy);
   app.post("/api/generate-copy", upload.none(), forwardGenerateCopy);
 
+  const cleanupUploaded = (mediaList: Express.Multer.File[], audio?: Express.Multer.File) => {
+    [...mediaList, ...(audio ? [audio] : [])].forEach((file) => {
+      if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    });
+  };
+
   // API Route for video generation
-  app.post("/api/generate", upload.array("media"), async (req, res) => {
-    const files = req.files as Express.Multer.File[];
+  app.post("/api/generate", GENERATE_UPLOAD, async (req, res) => {
+    const fieldFiles = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const mediaFiles = fieldFiles?.media ?? [];
+    const audioMulterFile = fieldFiles?.audio?.[0];
     console.log("--- Nouvelle requête de génération reçue ---");
     
     try {
@@ -139,13 +151,24 @@ async function startServer() {
       }
 
       // Add files
-      if (files && files.length > 0) {
-        files.forEach((file) => {
+      if (mediaFiles.length > 0) {
+        mediaFiles.forEach((file) => {
           externalFormData.append('media', fs.createReadStream(file.path), {
             filename: file.originalname,
             contentType: file.mimetype,
           });
         });
+      }
+
+      if (audioMulterFile) {
+        externalFormData.append(
+          "audio",
+          fs.createReadStream(audioMulterFile.path),
+          {
+            filename: audioMulterFile.originalname,
+            contentType: audioMulterFile.mimetype,
+          }
+        );
       }
 
       // Forward to Render API
@@ -164,9 +187,7 @@ async function startServer() {
       console.log("Corps de la réponse externe:", JSON.stringify(response.data).substring(0, 500));
 
       // Cleanup local files
-      files.forEach(file => {
-        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-      });
+      cleanupUploaded(mediaFiles, audioMulterFile);
 
       const responseData = response.data;
       
@@ -189,11 +210,7 @@ async function startServer() {
       console.error("External API error:", error.response?.data || error.message);
       
       // Cleanup local files on error
-      if (files) {
-        files.forEach(file => {
-          if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-        });
-      }
+      cleanupUploaded(mediaFiles, audioMulterFile);
 
       let errorMessage = "Erreur lors de la communication avec l'API externe";
       if (error.code === 'ECONNABORTED') {
