@@ -405,17 +405,21 @@ export default function App() {
     if (audioInputRef.current) audioInputRef.current.value = "";
   };
 
+  const hasAudio = audioFile !== null;
+  const promoTrimmed = promoText.trim();
+  const hasValidText = promoTrimmed.length >= MIN_PROMO_CHARS;
+  const hasContent = hasAudio || hasValidText;
+
   const canSubmit =
     files.length > 0 &&
-    audioFile !== null &&
-    promoText.trim().length >= MIN_PROMO_CHARS &&
+    hasContent &&
     apiStatus !== "offline";
 
   const submitDisabledReason = (): string | undefined => {
     if (files.length === 0) return t.validationMedia;
-    if (!audioFile) return t.validationAudio;
-    if (promoText.trim().length < MIN_PROMO_CHARS) return t.validationText;
     if (apiStatus === "offline") return t.apiOffline;
+    if (!hasAudio && promoTrimmed.length === 0) return t.validationTextOrAudio;
+    if (!hasAudio && promoTrimmed.length < MIN_PROMO_CHARS) return t.validationText;
     return undefined;
   };
 
@@ -587,11 +591,11 @@ export default function App() {
       return;
     }
     const promoTrimmed = promoText.trim();
-    if (!promoTrimmed) {
-      setStatus({ type: 'error', message: "Texte requis: ajoutez un texte promotionnel." });
+    if (!hasAudio && promoTrimmed.length === 0) {
+      setStatus({ type: 'error', message: t.validationTextOrAudio });
       return;
     }
-    if (promoTrimmed.length < MIN_PROMO_CHARS) {
+    if (!hasAudio && promoTrimmed.length < MIN_PROMO_CHARS) {
       setStatus({ type: 'error', message: `Texte trop court: minimum ${MIN_PROMO_CHARS} caractères.` });
       return;
     }
@@ -614,6 +618,7 @@ export default function App() {
       
       const formData = new FormData();
       files.forEach(file => formData.append('media', file));
+      if (audioFile) formData.append("audio", audioFile);
       formData.append('text', promoText);
       formData.append('promoText', promoText);
       formData.append('transition_preset', transitionPreset);
@@ -1059,12 +1064,18 @@ export default function App() {
             onChange={(e) => setPromoText(e.target.value.slice(0, MAX_PROMO_CHARS))}
             rows={5}
             maxLength={MAX_PROMO_CHARS}
-            required
             aria-describedby="text-help text-counter"
             className={`w-full p-4 bg-cream/30 border rounded-xl input-focus text-coffee placeholder:text-coffee/30 resize-y min-h-[110px] leading-relaxed transition-colors ${
-              promoText.trim().length >= MIN_PROMO_CHARS ? "ux-field-filled border-terracotta/25" : "border-terracotta/10"
+              promoText.trim().length >= MIN_PROMO_CHARS || audioFile
+                ? "ux-field-filled border-terracotta/25"
+                : "border-terracotta/10"
             }`}
           />
+          {audioFile && (
+            <p className="text-[11px] text-coffee/50 mt-2 leading-snug" role="status">
+              {t.textOptionalWithAudio}
+            </p>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-coffee/45">
             <span id="text-help">{t.textHelper}</span>
             <span id="text-counter" className="tabular-nums text-coffee/55">
