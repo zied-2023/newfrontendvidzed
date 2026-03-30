@@ -619,8 +619,11 @@ export default function App() {
       const formData = new FormData();
       files.forEach(file => formData.append('media', file));
       if (audioFile) formData.append("audio", audioFile);
-      formData.append('text', promoText);
-      formData.append('promoText', promoText);
+      // Avec upload audio : n'envoyer texte que s'il est présent (sous-titres). Sans audio : flux TTS inchangé.
+      if (!audioFile || promoTrimmed) {
+        formData.append('text', promoText);
+        formData.append('promoText', promoText);
+      }
       formData.append('transition_preset', transitionPreset);
       formData.append('camera_style', cameraStyle);
       formData.append('music_style', musicStyle);
@@ -634,17 +637,30 @@ export default function App() {
         setStatus({ type: "error", message: "Code voix invalide: utilisez un code lisible (ex: salim), jamais un ID brut." });
         return;
       }
-      // Manual only: never append voice_code in auto mode (empty = server picks by language).
       const manualVoiceCode = normalizeReadableVoiceCode(voiceCode);
-      if (manualVoiceCode) {
-        if (normalizedLanguage === "ar" && isTunisianVoiceCode(manualVoiceCode)) {
-          const ok = window.confirm(
-            "Vous avez choisi une voix tunisienne (Derja) alors que la langue est arabe fusha. Continuer avec ce choix manuel ?"
-          );
-          if (!ok) {
+
+      const confirmTunisianVoiceIfNeeded = (code: string): boolean => {
+        if (normalizedLanguage !== "ar" || !isTunisianVoiceCode(code)) return true;
+        return window.confirm(
+          "Vous avez choisi une voix tunisienne (Derja) alors que la langue est arabe fusha. Continuer avec ce choix manuel ?"
+        );
+      };
+
+      if (audioFile) {
+        if (manualVoiceCode) {
+          if (!confirmTunisianVoiceIfNeeded(manualVoiceCode)) {
             setIsGenerating(false);
             return;
           }
+          formData.append("audio_mode", "voice_ai");
+          formData.append("voice_code", manualVoiceCode);
+        } else {
+          formData.append("audio_mode", "raw");
+        }
+      } else if (manualVoiceCode) {
+        if (!confirmTunisianVoiceIfNeeded(manualVoiceCode)) {
+          setIsGenerating(false);
+          return;
         }
         formData.append("voice_code", manualVoiceCode);
       }

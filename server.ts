@@ -114,7 +114,8 @@ async function startServer() {
         subtitleStyle, 
         subtitle_style,
         voice,
-        voice_code
+        voice_code,
+        audio_mode,
       } = req.body;
 
       const tr = String(transition || transition_preset || "");
@@ -148,6 +149,11 @@ async function startServer() {
         externalFormData.append('voice_code', voice_code);
       } else if (voice) {
         externalFormData.append('voice', voice);
+      }
+
+      const audioModeStr = audio_mode != null && String(audio_mode).trim() !== "" ? String(audio_mode).trim() : "";
+      if (audioModeStr) {
+        externalFormData.append("audio_mode", audioModeStr);
       }
 
       // Add files
