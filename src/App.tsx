@@ -297,11 +297,16 @@ export default function App() {
   const [subtitleModeApi, setSubtitleModeApi] = useState("");
   const [subtitleStyleApi, setSubtitleStyleApi] = useState("capcut");
   const [voiceCode, setVoiceCode] = useState("");
-  const [v2Cta, setV2Cta] = useState("");
-  const [v2SafeZone, setV2SafeZone] = useState("");
-  const [v2OutputFormat, setV2OutputFormat] = useState("");
+  const [ctaPhone, setCtaPhone] = useState("");
+  const [ctaAddress, setCtaAddress] = useState("");
+  const [ctaDuration, setCtaDuration] = useState("");
+  const [ctaLogoUrl, setCtaLogoUrl] = useState("");
+  const [ctaLogoFile, setCtaLogoFile] = useState<File | null>(null);
+  const [safeZoneMode, setSafeZoneMode] = useState("");
+  const [outputFormats, setOutputFormats] = useState("");
   const [v2TextStyle, setV2TextStyle] = useState("");
   const [v2HookIntensity, setV2HookIntensity] = useState("");
+  const [parallelEncoding, setParallelEncoding] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -337,6 +342,7 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const ctaLogoInputRef = useRef<HTMLInputElement>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -779,12 +785,23 @@ export default function App() {
       }
 
       if (isVideoApiV2Enabled()) {
-        const ctaTrim = v2Cta.trim();
-        if (ctaTrim) formData.append("cta", ctaTrim);
-        if (v2SafeZone) formData.append("safe_zone", v2SafeZone);
-        if (v2OutputFormat) formData.append("output_format", v2OutputFormat);
+        const hasCtaBlock =
+          !!ctaPhone.trim() ||
+          !!ctaAddress.trim() ||
+          !!ctaDuration.trim() ||
+          !!ctaLogoUrl.trim() ||
+          !!ctaLogoFile;
+        formData.append("cta_enabled", hasCtaBlock ? "true" : "false");
+        if (ctaPhone.trim()) formData.append("cta_phone", ctaPhone.trim());
+        if (ctaAddress.trim()) formData.append("cta_address", ctaAddress.trim());
+        if (ctaDuration.trim()) formData.append("cta_duration", ctaDuration.trim());
+        if (ctaLogoUrl.trim()) formData.append("cta_logo_url", ctaLogoUrl.trim());
+        if (ctaLogoFile) formData.append("cta_logo", ctaLogoFile);
+        if (safeZoneMode) formData.append("safe_zone_mode", safeZoneMode);
+        if (outputFormats.trim()) formData.append("output_formats", outputFormats.trim());
         if (v2TextStyle) formData.append("text_style", v2TextStyle);
         if (v2HookIntensity) formData.append("hook_intensity", v2HookIntensity);
+        formData.append("parallel_encoding", parallelEncoding ? "true" : "false");
       }
 
       if (shouldDebugGenerateFormData()) {
@@ -1557,49 +1574,135 @@ export default function App() {
                   <p className="text-[11px] text-coffee/50 leading-snug">{t.v2ApiOptionsHint}</p>
                 </div>
                 <div className="md:col-span-2">
-                  <label htmlFor="v2_cta" className={fieldLabelClass}>
-                    {t.optCta}
-                  </label>
-                  <input
-                    id="v2_cta"
-                    type="text"
-                    value={v2Cta}
-                    onChange={(e) => setV2Cta(e.target.value.slice(0, 200))}
-                    placeholder={t.optCtaPlaceholder}
-                    className={nativeSelectClass}
-                    autoComplete="off"
-                  />
+                  <p className="text-xs font-medium text-coffee/70 mb-2">{t.ctaSectionTitle}</p>
+                  <p className="text-[11px] text-coffee/45 mb-3">{t.ctaEnabledHint}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="cta_phone" className={fieldLabelClass}>
+                        {t.ctaPhoneLabel}
+                      </label>
+                      <input
+                        id="cta_phone"
+                        type="text"
+                        value={ctaPhone}
+                        onChange={(e) => setCtaPhone(e.target.value.slice(0, 80))}
+                        className={nativeSelectClass}
+                        autoComplete="tel"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="cta_duration" className={fieldLabelClass}>
+                        {t.ctaDurationLabel}
+                      </label>
+                      <input
+                        id="cta_duration"
+                        type="text"
+                        value={ctaDuration}
+                        onChange={(e) => setCtaDuration(e.target.value.slice(0, 40))}
+                        placeholder={t.ctaDurationPlaceholder}
+                        className={nativeSelectClass}
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <label htmlFor="cta_address" className={fieldLabelClass}>
+                      {t.ctaAddressLabel}
+                    </label>
+                    <input
+                      id="cta_address"
+                      type="text"
+                      value={ctaAddress}
+                      onChange={(e) => setCtaAddress(e.target.value.slice(0, 200))}
+                      className={nativeSelectClass}
+                      autoComplete="street-address"
+                    />
+                  </div>
+                  <div className="mt-3">
+                    <label htmlFor="cta_logo_url" className={fieldLabelClass}>
+                      {t.ctaLogoUrlLabel}
+                    </label>
+                    <input
+                      id="cta_logo_url"
+                      type="url"
+                      value={ctaLogoUrl}
+                      onChange={(e) => setCtaLogoUrl(e.target.value.slice(0, 500))}
+                      placeholder="https://"
+                      className={nativeSelectClass}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <label htmlFor="cta_logo_file" className="sr-only">
+                      {t.ctaLogoFileLabel}
+                    </label>
+                    <input
+                      id="cta_logo_file"
+                      ref={ctaLogoInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        setCtaLogoFile(f ?? null);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => ctaLogoInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-cream text-coffee border border-coffee/10 rounded-full text-sm font-medium hover:bg-white transition-colors"
+                    >
+                      <Upload size={16} className="text-terracotta shrink-0" aria-hidden />
+                      {t.ctaLogoPick}
+                    </button>
+                    {ctaLogoFile && (
+                      <span className="text-sm text-coffee/70 truncate max-w-[200px]" title={ctaLogoFile.name}>
+                        {ctaLogoFile.name}
+                      </span>
+                    )}
+                    {ctaLogoFile && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCtaLogoFile(null);
+                          if (ctaLogoInputRef.current) ctaLogoInputRef.current.value = "";
+                        }}
+                        className="text-sm text-terracotta hover:underline"
+                      >
+                        {t.ctaLogoClear}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div>
-                  <label htmlFor="v2_safe_zone" className={fieldLabelClass}>
-                    {t.optSafeZone}
+                  <label htmlFor="safe_zone_mode" className={fieldLabelClass}>
+                    {t.optSafeZoneMode}
                   </label>
                   <select
-                    id="v2_safe_zone"
-                    value={v2SafeZone}
-                    onChange={(e) => setV2SafeZone(e.target.value)}
+                    id="safe_zone_mode"
+                    value={safeZoneMode}
+                    onChange={(e) => setSafeZoneMode(e.target.value)}
                     className={nativeSelectClass}
                   >
                     <option value="">{t.safeZoneDefault}</option>
-                    <option value="none">{t.safeZoneNone}</option>
-                    <option value="vertical_9_16">{t.safeZoneVertical}</option>
-                    <option value="square_1_1">{t.safeZoneSquare}</option>
+                    <option value="disabled">{t.safeZoneDisabled}</option>
+                    <option value="standard">{t.safeZoneStandard}</option>
+                    <option value="strict">{t.safeZoneStrict}</option>
                   </select>
                 </div>
-                <div>
-                  <label htmlFor="v2_output_format" className={fieldLabelClass}>
-                    {t.optOutputFormat}
+                <div className="md:col-span-2">
+                  <label htmlFor="output_formats" className={fieldLabelClass}>
+                    {t.optOutputFormats}
                   </label>
-                  <select
-                    id="v2_output_format"
-                    value={v2OutputFormat}
-                    onChange={(e) => setV2OutputFormat(e.target.value)}
+                  <input
+                    id="output_formats"
+                    type="text"
+                    value={outputFormats}
+                    onChange={(e) => setOutputFormats(e.target.value.slice(0, 120))}
+                    placeholder={t.optOutputFormatsPlaceholder}
                     className={nativeSelectClass}
-                  >
-                    <option value="">{t.formatDefault}</option>
-                    <option value="mp4_vertical_9_16">{t.formatMp4169}</option>
-                    <option value="mp4_landscape_16_9">{t.formatMp4Landscape}</option>
-                  </select>
+                    autoComplete="off"
+                  />
                 </div>
                 <div>
                   <label htmlFor="v2_text_style" className={fieldLabelClass}>
@@ -1631,6 +1734,18 @@ export default function App() {
                     <option value="medium">{t.hookMedium}</option>
                     <option value="high">{t.hookHigh}</option>
                   </select>
+                </div>
+                <div className="md:col-span-2 flex items-start gap-3">
+                  <input
+                    id="parallel_encoding"
+                    type="checkbox"
+                    checked={parallelEncoding}
+                    onChange={(e) => setParallelEncoding(e.target.checked)}
+                    className="mt-1 rounded border-terracotta/40 text-terracotta focus:ring-terracotta/40"
+                  />
+                  <label htmlFor="parallel_encoding" className="text-sm text-coffee/80 leading-snug cursor-pointer">
+                    {t.optParallelEncoding}
+                  </label>
                 </div>
               </>
             )}

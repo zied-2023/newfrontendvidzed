@@ -22,6 +22,7 @@ const upload = multer({ dest: "uploads/" });
 const GENERATE_UPLOAD = upload.fields([
   { name: "media", maxCount: 10 },
   { name: "audio", maxCount: 1 },
+  { name: "cta_logo", maxCount: 1 },
 ]);
 const EXTERNAL_API_URL = "https://video1-agent-api.onrender.com";
 
@@ -91,8 +92,12 @@ async function startServer() {
   app.post("/generate-copy", upload.none(), forwardGenerateCopy);
   app.post("/api/generate-copy", upload.none(), forwardGenerateCopy);
 
-  const cleanupUploaded = (mediaList: Express.Multer.File[], audio?: Express.Multer.File) => {
-    [...mediaList, ...(audio ? [audio] : [])].forEach((file) => {
+  const cleanupUploaded = (
+    mediaList: Express.Multer.File[],
+    audio?: Express.Multer.File,
+    ctaLogo?: Express.Multer.File
+  ) => {
+    [...mediaList, ...(audio ? [audio] : []), ...(ctaLogo ? [ctaLogo] : [])].forEach((file) => {
       if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
     });
   };
@@ -102,6 +107,7 @@ async function startServer() {
     const fieldFiles = req.files as Record<string, Express.Multer.File[]> | undefined;
     const mediaFiles = fieldFiles?.media ?? [];
     const audioMulterFile = fieldFiles?.audio?.[0];
+    const ctaLogoMulterFile = fieldFiles?.cta_logo?.[0];
     console.log("--- Nouvelle requête de génération reçue ---");
     
     try {
@@ -121,11 +127,16 @@ async function startServer() {
         voice,
         voice_code,
         audio_mode,
-        cta,
-        safe_zone,
-        output_format,
+        cta_enabled,
+        cta_phone,
+        cta_address,
+        cta_duration,
+        cta_logo_url,
+        safe_zone_mode,
+        output_formats,
         text_style,
         hook_intensity,
+        parallel_encoding,
       } = req.body;
 
       const tr = String(transition || transition_preset || "");
@@ -171,11 +182,23 @@ async function startServer() {
         const s = String(val).trim();
         if (s) externalFormData.append(key, s);
       };
-      appendIf("cta", cta);
-      appendIf("safe_zone", safe_zone);
-      appendIf("output_format", output_format);
+      const appendBool = (key: string, val: unknown) => {
+        if (val === undefined || val === null) return;
+        const s = String(val).trim().toLowerCase();
+        if (s === "true" || s === "1" || s === "yes") externalFormData.append(key, "true");
+        else if (s === "false" || s === "0" || s === "no") externalFormData.append(key, "false");
+      };
+
+      appendBool("cta_enabled", cta_enabled);
+      appendIf("cta_phone", cta_phone);
+      appendIf("cta_address", cta_address);
+      appendIf("cta_duration", cta_duration);
+      appendIf("cta_logo_url", cta_logo_url);
+      appendIf("safe_zone_mode", safe_zone_mode);
+      appendIf("output_formats", output_formats);
       appendIf("text_style", text_style);
       appendIf("hook_intensity", hook_intensity);
+      appendBool("parallel_encoding", parallel_encoding);
 
       // Add files
       if (mediaFiles.length > 0) {
@@ -198,6 +221,17 @@ async function startServer() {
         );
       }
 
+      if (ctaLogoMulterFile) {
+        externalFormData.append(
+          "cta_logo",
+          fs.createReadStream(ctaLogoMulterFile.path),
+          {
+            filename: ctaLogoMulterFile.originalname,
+            contentType: ctaLogoMulterFile.mimetype,
+          }
+        );
+      }
+
       // Forward to Render API
       // On utilise /generate comme suggéré dans votre snippet
       const targetUrl = `${EXTERNAL_API_URL}/generate`;
@@ -214,7 +248,7 @@ async function startServer() {
       console.log("Corps de la réponse externe:", JSON.stringify(response.data).substring(0, 500));
 
       // Cleanup local files
-      cleanupUploaded(mediaFiles, audioMulterFile);
+      cleanupUploaded(mediaFiles, audioMulterFile, ctaLogoMulterFile);
 
       const responseData = response.data;
       
@@ -237,7 +271,7 @@ async function startServer() {
       console.error("External API error:", error.response?.data || error.message);
       
       // Cleanup local files on error
-      cleanupUploaded(mediaFiles, audioMulterFile);
+      cleanupUploaded(mediaFiles, audioMulterFile, ctaLogoMulterFile);
 
       let errorMessage = "Erreur lors de la communication avec l'API externe";
       if (error.code === 'ECONNABORTED') {

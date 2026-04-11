@@ -1,10 +1,11 @@
 /**
- * Contrat client ↔ API vidéo (externe).
- * Les noms snake_case ci-dessous sont des hypothèses alignées sur la demande produit ;
- * à ajuster dès publication OpenAPI / README / staging (une seule source de vérité).
+ * Contrat client ↔ API vidéo (externe) — video-agent-api (snake_case).
  *
- * Feature flag : VITE_VIDEO_API_V2 — active l’UI options avancées « v2 » et l’envoi
- * des champs optionnels non vides (évite de casser une API v1 qui rejette les clés inconnues).
+ * POST /generate (multipart, si VITE_VIDEO_API_V2) : cta_enabled, cta_phone, cta_address,
+ * cta_duration, cta_logo (fichier), cta_logo_url, safe_zone_mode, output_formats, text_style,
+ * hook_intensity, parallel_encoding (+ champs historiques inchangés).
+ *
+ * Feature flag : VITE_VIDEO_API_V2 — active l’UI v2 et ces champs (redémarrer Vite après .env).
  */
 
 export function isVideoApiV2Enabled(): boolean {
@@ -42,7 +43,6 @@ function pickString(v: unknown): string | undefined {
 export function extractOutputsFromStatus(data: Record<string, unknown>): StatusOutputDraft[] | null {
   const raw = data.outputs ?? data.output_files ?? data.result_outputs;
   if (!Array.isArray(raw) || raw.length === 0) return null;
-  const base = apiBase.replace(/\/+$/, "");
   const out: StatusOutputDraft[] = [];
   let i = 0;
   for (const item of raw) {
