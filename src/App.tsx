@@ -520,10 +520,11 @@ export default function App() {
       }
       const dataRec = data as Record<string, unknown>;
       const outputDrafts = API_URL ? extractOutputsFromStatus(dataRec) : null;
+      // Ne considérer comme terminé QUE sur status="completed" ou présence de download_url.
+      // Ne pas utiliser outputDrafts seul : les formats dérivés peuvent arriver en retard.
       const isCompleted =
         data.status === "completed" ||
-        data.download_url ||
-        !!(outputDrafts && outputDrafts.length > 0);
+        (typeof data.download_url === "string" && data.download_url.trim().length > 0);
       const isFailed = data.status === 'failed' || data.status === 'error';
 
       if (isFailed) {
@@ -552,95 +553,54 @@ export default function App() {
 
         const statusLabel = (typeof data.status === "string" ? data.status : "") || (typeof data.message === "string" ? data.message : "") || t.generating;
 
-        const tryLegacySingleDownload = async () => {
-          const videoRes = await fetch(`${API_URL}/download/${jobId}`);
-          const contentType = videoRes.headers.get("content-type");
-          if (videoRes.ok && contentType && contentType.includes("video")) {
-            const blob = await videoRes.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            setJobProgress({
-              status: statusLabel,
-              download_url: blobUrl,
-              outputDownloads: undefined,
-            });
-            setStatus({ type: "success", message: t.videoReady });
-            setIsGenerating(false);
-            return true;
-          }
-          return false;
-        };
-
         try {
           if (outputDrafts && outputDrafts.length > 0 && API_URL) {
+            // Multi-format : URLs directes pour téléchargement (pas de fetch bloquant par format).
+            // Le player <video> utilise l'URL directe du premier format (CORS activé côté API).
             const resolved = resolveOutputHrefs(outputDrafts, jobId, API_URL);
-            const outputDownloads: Array<{
-              key: string;
-              label: string;
-              href: string;
-              isVideo: boolean;
-            }> = [];
-            let firstVideoHref: string | undefined;
+            const outputDownloads = resolved.map((r) => ({
+              key: r.key,
+              label: r.label,
+              href: r.href,
+              isVideo: true,
+            }));
 
-            for (const r of resolved) {
-              try {
-                const fr = await fetch(r.href);
-                const ct = fr.headers.get("content-type") || "";
-                const isVideo = ct.includes("video") || isProbablyVideoUrl(r.href, ct);
-                if (fr.ok) {
-                  const blob = await fr.blob();
-                  const blobUrl = URL.createObjectURL(blob);
-                  outputDownloads.push({
-                    key: r.key,
-                    label: r.label,
-                    href: blobUrl,
-                    isVideo,
-                  });
-                  if (isVideo && !firstVideoHref) firstVideoHref = blobUrl;
-                } else {
-                  outputDownloads.push({
-                    key: r.key,
-                    label: r.label,
-                    href: r.href,
-                    isVideo: isProbablyVideoUrl(r.href),
-                  });
-                  if (isProbablyVideoUrl(r.href) && !firstVideoHref) firstVideoHref = r.href;
-                }
-              } catch {
-                const isVideo = isProbablyVideoUrl(r.href);
-                outputDownloads.push({
-                  key: r.key,
-                  label: r.label,
-                  href: r.href,
-                  isVideo,
-                });
-                if (isVideo && !firstVideoHref) firstVideoHref = r.href;
-              }
+            if (outputDownloads.length === 1) {
+              setJobProgress({
+                status: statusLabel,
+                download_url: outputDownloads[0].href,
+                outputDownloads: undefined,
+              });
+            } else {
+              setJobProgress({
+                status: statusLabel,
+                download_url: outputDownloads[0].href,
+                outputDownloads,
+              });
             }
-
-            if (outputDownloads.length > 0) {
-              if (outputDownloads.length === 1) {
-                setJobProgress({
-                  status: statusLabel,
-                  download_url: outputDownloads[0].href,
-                  outputDownloads: undefined,
-                });
+            setStatus({ type: "success", message: t.videoReady });
+            setIsGenerating(false);
+          } else {
+            // Fallback legacy : blob download pour un seul format
+            const legacyUrl = `${API_URL}/download/${jobId}`;
+            try {
+              const videoRes = await fetch(legacyUrl);
+              const contentType = videoRes.headers.get("content-type");
+              if (videoRes.ok && contentType && contentType.includes("video")) {
+                const blob = await videoRes.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                setJobProgress({ status: statusLabel, download_url: blobUrl, outputDownloads: undefined });
               } else {
-                setJobProgress({
-                  status: statusLabel,
-                  download_url: firstVideoHref,
-                  outputDownloads,
-                });
+                setJobProgress({ status: statusLabel, download_url: legacyUrl, outputDownloads: undefined });
               }
-              setStatus({ type: "success", message: t.videoReady });
-              setIsGenerating(false);
-            } else if (!(await tryLegacySingleDownload())) {
-              throw new Error("Invalid video response");
+            } catch {
+              setJobProgress({ status: statusLabel, download_url: legacyUrl, outputDownloads: undefined });
             }
-          } else if (!(await tryLegacySingleDownload())) {
-            throw new Error("Invalid video response");
+            setStatus({ type: "success", message: t.videoReady });
+            setIsGenerating(false);
           }
         } catch (err) {
-          console.error("Error downloading video blob:", err);
+          console.error("Error loading video:", err);
           setStatus({ type: 'error', message: "Erreur lors du chargement de la vidéo." });
         }
       } else {

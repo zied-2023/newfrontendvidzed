@@ -83,11 +83,18 @@ export function extractOutputsFromStatus(data: Record<string, unknown>): StatusO
   return out.length ? out : null;
 }
 
+/** Retourne true si l'URL relative ressemble à un chemin d'action API (ex. /generate) plutôt qu'à un vrai téléchargement. */
+function isApiActionPath(u: string): boolean {
+  return /^\/?(?:api\/)?generate(?:[\/?#]|$)/i.test(u);
+}
+
 function resolveOutputHref(draft: StatusOutputDraft, jobId: string, apiBase: string): string {
   const base = apiBase.replace(/\/+$/, "");
   if (draft.url) {
     const u = draft.url;
     if (/^https?:\/\//i.test(u)) return u;
+    // Ignorer les placeholders serveur qui ressemblent à /generate (format pas encore prêt)
+    if (isApiActionPath(u)) return `${base}/download/${jobId}${draft.format ? `?format=${encodeURIComponent(draft.format)}` : ""}`;
     return `${base}${u.startsWith("/") ? u : `/${u}`}`;
   }
   if (draft.format) {
