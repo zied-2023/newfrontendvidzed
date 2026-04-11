@@ -5,7 +5,7 @@
  * cta_duration, cta_logo (fichier), cta_logo_url, safe_zone_mode, output_formats, text_style,
  * hook_intensity, parallel_encoding (+ champs historiques inchangés).
  *
- * Feature flag : VITE_VIDEO_API_V2 — active l’UI v2 et ces champs (redémarrer Vite après .env).
+ * Feature flag : VITE_VIDEO_API_V2 — active l'UI v2 et ces champs (redémarrer Vite après .env).
  */
 
 export function isVideoApiV2Enabled(): boolean {
@@ -13,7 +13,7 @@ export function isVideoApiV2Enabled(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-/** Chemins health à tester dans l’ordre (base API_URL sans slash final). */
+/** Chemins health à tester dans l'ordre (base API_URL sans slash final). */
 export const HEALTH_PATHS = ["/health", "/api/health"] as const;
 
 export type StatusOutputDraft = {
@@ -37,33 +37,49 @@ function pickString(v: unknown): string | undefined {
 }
 
 /**
- * Extrait une liste de sorties depuis la réponse GET /status (tolérant plusieurs formes).
- * Ne dépend pas du flag v2 : si l’API renvoie outputs, on les exploite.
+ * Extrait une liste de sorties depuis la réponse GET /status.
+ * Ne dépend pas du flag v2.
+ * Tolère deux formes pour `outputs` (et aliases `output_files`, `result_outputs`) :
+ *  - tableau d'objets : [{ url, format, label, … }, …]
+ *  - objet map        : { "9:16": "/download/…?format=9%3A16", "1:1": "…", … }
  */
 export function extractOutputsFromStatus(data: Record<string, unknown>): StatusOutputDraft[] | null {
   const raw = data.outputs ?? data.output_files ?? data.result_outputs;
-  if (!Array.isArray(raw) || raw.length === 0) return null;
+  if (raw === undefined || raw === null) return null;
+
   const out: StatusOutputDraft[] = [];
-  let i = 0;
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const o = item as Record<string, unknown>;
-    const url =
-      pickString(o.url) ??
-      pickString(o.download_url) ??
-      pickString(o.href) ??
-      pickString(o.file_url);
-    const format = pickString(o.format) ?? pickString(o.profile) ?? pickString(o.variant);
-    const label =
-      pickString(o.label) ??
-      pickString(o.name) ??
-      (format ? format : `output_${i}`);
-    const type = pickString(o.type) ?? pickString(o.mime_type);
-    if (url || format) {
-      out.push({ url, format, label, type });
-      i++;
+
+  if (Array.isArray(raw)) {
+    let i = 0;
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      const url =
+        pickString(o.url) ??
+        pickString(o.download_url) ??
+        pickString(o.href) ??
+        pickString(o.file_url);
+      const format = pickString(o.format) ?? pickString(o.profile) ?? pickString(o.variant);
+      const label =
+        pickString(o.label) ??
+        pickString(o.name) ??
+        (format ? format : `output_${i}`);
+      const type = pickString(o.type) ?? pickString(o.mime_type);
+      if (url || format) {
+        out.push({ url, format, label, type });
+        i++;
+      }
+    }
+  } else if (typeof raw === "object") {
+    // Forme map : { "9:16": "/download/…", "1:1": "/download/…", … }
+    for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+      const url = pickString(val);
+      if (url) {
+        out.push({ url, format: key, label: key });
+      }
     }
   }
+
   return out.length ? out : null;
 }
 
