@@ -303,7 +303,7 @@ export default function App() {
   const [ctaLogoUrl, setCtaLogoUrl] = useState("");
   const [ctaLogoFile, setCtaLogoFile] = useState<File | null>(null);
   const [safeZoneMode, setSafeZoneMode] = useState("");
-  const [outputFormats, setOutputFormats] = useState("");
+  const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set(["9:16"]));
   const [v2TextStyle, setV2TextStyle] = useState("");
   const [v2HookIntensity, setV2HookIntensity] = useState("");
   const [parallelEncoding, setParallelEncoding] = useState(false);
@@ -798,7 +798,8 @@ export default function App() {
         if (ctaLogoUrl.trim()) formData.append("cta_logo_url", ctaLogoUrl.trim());
         if (ctaLogoFile) formData.append("cta_logo", ctaLogoFile);
         if (safeZoneMode) formData.append("safe_zone_mode", safeZoneMode);
-        if (outputFormats.trim()) formData.append("output_formats", outputFormats.trim());
+        const fmtStr = Array.from(selectedFormats).join(",");
+        if (fmtStr) formData.append("output_formats", fmtStr);
         if (v2TextStyle) formData.append("text_style", v2TextStyle);
         if (v2HookIntensity) formData.append("hook_intensity", v2HookIntensity);
         formData.append("parallel_encoding", parallelEncoding ? "true" : "false");
@@ -1691,18 +1692,31 @@ export default function App() {
                   </select>
                 </div>
                 <div className="md:col-span-2">
-                  <label htmlFor="output_formats" className={fieldLabelClass}>
-                    {t.optOutputFormats}
-                  </label>
-                  <input
-                    id="output_formats"
-                    type="text"
-                    value={outputFormats}
-                    onChange={(e) => setOutputFormats(e.target.value.slice(0, 120))}
-                    placeholder={t.optOutputFormatsPlaceholder}
-                    className={nativeSelectClass}
-                    autoComplete="off"
-                  />
+                  <p className={fieldLabelClass}>{t.optOutputFormats}</p>
+                  <p className="text-[11px] text-coffee/45 mb-2">{t.optOutputFormatsHint}</p>
+                  <div className="flex flex-wrap gap-3">
+                    {(["9:16", "1:1", "16:9"] as const).map((ratio) => {
+                      const checked = selectedFormats.has(ratio);
+                      return (
+                        <label key={ratio} className="inline-flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedFormats((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(ratio)) next.delete(ratio);
+                                else next.add(ratio);
+                                return next;
+                              });
+                            }}
+                            className="rounded border-terracotta/40 text-terracotta focus:ring-terracotta/40"
+                          />
+                          <span className="text-sm text-coffee">{ratio}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div>
                   <label htmlFor="v2_text_style" className={fieldLabelClass}>
@@ -1716,7 +1730,7 @@ export default function App() {
                   >
                     <option value="">{t.textStyleDefault}</option>
                     <option value="minimal">{t.textStyleMinimal}</option>
-                    <option value="bold_social">{t.textStyleBoldSocial}</option>
+                    <option value="high_contrast">{t.textStyleHighContrast}</option>
                   </select>
                 </div>
                 <div>
