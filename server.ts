@@ -38,9 +38,14 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Health check
+  const healthPayload = () => ({ status: "ok", externalApi: EXTERNAL_API_URL });
+
+  // Health check (les deux chemins pour coller au front qui teste /health puis /api/health)
+  app.get("/health", (req, res) => {
+    res.json(healthPayload());
+  });
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", externalApi: EXTERNAL_API_URL });
+    res.json(healthPayload());
   });
 
   /** Proxy génération de texte (Mistral) — même contrat que le HTML statique */
@@ -116,6 +121,11 @@ async function startServer() {
         voice,
         voice_code,
         audio_mode,
+        cta,
+        safe_zone,
+        output_format,
+        text_style,
+        hook_intensity,
       } = req.body;
 
       const tr = String(transition || transition_preset || "");
@@ -155,6 +165,17 @@ async function startServer() {
       if (audioModeStr) {
         externalFormData.append("audio_mode", audioModeStr);
       }
+
+      const appendIf = (key: string, val: unknown) => {
+        if (val === undefined || val === null) return;
+        const s = String(val).trim();
+        if (s) externalFormData.append(key, s);
+      };
+      appendIf("cta", cta);
+      appendIf("safe_zone", safe_zone);
+      appendIf("output_format", output_format);
+      appendIf("text_style", text_style);
+      appendIf("hook_intensity", hook_intensity);
 
       // Add files
       if (mediaFiles.length > 0) {
@@ -286,9 +307,17 @@ async function startServer() {
     try {
       const { jobId } = req.params;
       console.log(`Proxy de téléchargement pour le job: ${jobId}`);
-      
-      // On construit l'URL de téléchargement externe
-      const downloadUrl = `${EXTERNAL_API_URL}/download/${jobId}`;
+      const qsParams = new URLSearchParams();
+      for (const [k, v] of Object.entries(req.query)) {
+        if (v === undefined) continue;
+        if (typeof v === "string") qsParams.set(k, v);
+        else if (Array.isArray(v)) {
+          const first = v.find((x): x is string => typeof x === "string");
+          if (first) qsParams.set(k, first);
+        }
+      }
+      const qs = qsParams.toString();
+      const downloadUrl = `${EXTERNAL_API_URL}/download/${jobId}${qs ? `?${qs}` : ""}`;
       
       const response = await axios({
         method: 'get',

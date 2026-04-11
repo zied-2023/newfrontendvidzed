@@ -22,6 +22,13 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Language, translations } from './translations';
+import {
+  extractOutputsFromStatus,
+  HEALTH_PATHS,
+  isProbablyVideoUrl,
+  isVideoApiV2Enabled,
+  resolveOutputHrefs,
+} from "./apiContract";
 
 // --- Constants ---
 const API_URL = (() => {
@@ -263,6 +270,7 @@ export default function App() {
     return saved === "fr" || saved === "en" || saved === "ar" ? saved : "fr";
   });
   const t = translations[lang];
+  const videoApiV2 = isVideoApiV2Enabled();
   const copyLangOpts = t.copyLangOpts ?? translations.fr.copyLangOpts;
   const ambianceOpts = t.ambianceOpts ?? translations.fr.ambianceOpts;
   const transitionPresets = t.transitionPresets ?? translations.fr.transitionPresets;
@@ -289,12 +297,21 @@ export default function App() {
   const [subtitleModeApi, setSubtitleModeApi] = useState("");
   const [subtitleStyleApi, setSubtitleStyleApi] = useState("capcut");
   const [voiceCode, setVoiceCode] = useState("");
+  const [v2Cta, setV2Cta] = useState("");
+  const [v2SafeZone, setV2SafeZone] = useState("");
+  const [v2OutputFormat, setV2OutputFormat] = useState("");
+  const [v2TextStyle, setV2TextStyle] = useState("");
+  const [v2HookIntensity, setV2HookIntensity] = useState("");
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [jobProgress, setJobProgress] = useState<{ status: string, download_url?: string } | null>(null);
+  const [jobProgress, setJobProgress] = useState<{
+    status: string;
+    download_url?: string;
+    outputDownloads?: Array<{ key: string; label: string; href: string; isVideo: boolean }>;
+  } | null>(null);
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [copyLoading, setCopyLoading] = useState(false);
   const [improveLoading, setImproveLoading] = useState(false);
@@ -438,15 +455,22 @@ export default function App() {
   // Nettoyage du polling à la destruction du composant
   useEffect(() => {
     const checkApi = async () => {
+      if (!API_URL) {
+        setApiStatus("offline");
+        return;
+      }
       try {
-        const res = await fetch(`${API_URL}/health`);
-        if (res.ok) {
-          setApiStatus('online');
-        } else {
-          setApiStatus('offline');
+        let ok = false;
+        for (const path of HEALTH_PATHS) {
+          const res = await fetch(`${API_URL}${path}`);
+          if (res.ok) {
+            ok = true;
+            break;
+          }
         }
-      } catch (e) {
-        setApiStatus('offline');
+        setApiStatus(ok ? "online" : "offline");
+      } catch {
+        setApiStatus("offline");
       }
     };
     checkApi();
@@ -455,6 +479,16 @@ export default function App() {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const urls = [
+      jobProgress?.download_url,
+      ...(jobProgress?.outputDownloads?.map((o) => o.href) ?? []),
+    ].filter((u): u is string => Boolean(u) && u.startsWith("blob:"));
+    return () => {
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [jobProgress]);
 
   const pollJobStatus = async (jobId: string) => {
     try {
@@ -478,7 +512,12 @@ export default function App() {
         console.error("Failed to parse status JSON");
         return;
       }
-      const isCompleted = data.status === 'completed' || data.download_url;
+      const dataRec = data as Record<string, unknown>;
+      const outputDrafts = API_URL ? extractOutputsFromStatus(dataRec) : null;
+      const isCompleted =
+        data.status === "completed" ||
+        data.download_url ||
+        !!(outputDrafts && outputDrafts.length > 0);
       const isFailed = data.status === 'failed' || data.status === 'error';
 
       if (isFailed) {
@@ -493,7 +532,8 @@ export default function App() {
         });
         setJobProgress({
           status: "Échec",
-          download_url: undefined
+          download_url: undefined,
+          outputDownloads: undefined,
         });
         return;
       }
@@ -504,21 +544,93 @@ export default function App() {
           pollIntervalRef.current = null;
         }
 
-        try {
+        const statusLabel = (typeof data.status === "string" ? data.status : "") || (typeof data.message === "string" ? data.message : "") || t.generating;
+
+        const tryLegacySingleDownload = async () => {
           const videoRes = await fetch(`${API_URL}/download/${jobId}`);
-          const contentType = videoRes.headers.get('content-type');
-          
-          if (videoRes.ok && contentType && contentType.includes('video')) {
+          const contentType = videoRes.headers.get("content-type");
+          if (videoRes.ok && contentType && contentType.includes("video")) {
             const blob = await videoRes.blob();
             const blobUrl = URL.createObjectURL(blob);
-            
             setJobProgress({
-              status: data.status || data.message || t.generating,
-              download_url: blobUrl
+              status: statusLabel,
+              download_url: blobUrl,
+              outputDownloads: undefined,
             });
-            setStatus({ type: 'success', message: t.videoReady });
+            setStatus({ type: "success", message: t.videoReady });
             setIsGenerating(false);
-          } else {
+            return true;
+          }
+          return false;
+        };
+
+        try {
+          if (outputDrafts && outputDrafts.length > 0 && API_URL) {
+            const resolved = resolveOutputHrefs(outputDrafts, jobId, API_URL);
+            const outputDownloads: Array<{
+              key: string;
+              label: string;
+              href: string;
+              isVideo: boolean;
+            }> = [];
+            let firstVideoHref: string | undefined;
+
+            for (const r of resolved) {
+              try {
+                const fr = await fetch(r.href);
+                const ct = fr.headers.get("content-type") || "";
+                const isVideo = ct.includes("video") || isProbablyVideoUrl(r.href, ct);
+                if (fr.ok) {
+                  const blob = await fr.blob();
+                  const blobUrl = URL.createObjectURL(blob);
+                  outputDownloads.push({
+                    key: r.key,
+                    label: r.label,
+                    href: blobUrl,
+                    isVideo,
+                  });
+                  if (isVideo && !firstVideoHref) firstVideoHref = blobUrl;
+                } else {
+                  outputDownloads.push({
+                    key: r.key,
+                    label: r.label,
+                    href: r.href,
+                    isVideo: isProbablyVideoUrl(r.href),
+                  });
+                  if (isProbablyVideoUrl(r.href) && !firstVideoHref) firstVideoHref = r.href;
+                }
+              } catch {
+                const isVideo = isProbablyVideoUrl(r.href);
+                outputDownloads.push({
+                  key: r.key,
+                  label: r.label,
+                  href: r.href,
+                  isVideo,
+                });
+                if (isVideo && !firstVideoHref) firstVideoHref = r.href;
+              }
+            }
+
+            if (outputDownloads.length > 0) {
+              if (outputDownloads.length === 1) {
+                setJobProgress({
+                  status: statusLabel,
+                  download_url: outputDownloads[0].href,
+                  outputDownloads: undefined,
+                });
+              } else {
+                setJobProgress({
+                  status: statusLabel,
+                  download_url: firstVideoHref,
+                  outputDownloads,
+                });
+              }
+              setStatus({ type: "success", message: t.videoReady });
+              setIsGenerating(false);
+            } else if (!(await tryLegacySingleDownload())) {
+              throw new Error("Invalid video response");
+            }
+          } else if (!(await tryLegacySingleDownload())) {
             throw new Error("Invalid video response");
           }
         } catch (err) {
@@ -528,7 +640,8 @@ export default function App() {
       } else {
         setJobProgress({
           status: data.status || data.message || t.generating,
-          download_url: undefined
+          download_url: undefined,
+          outputDownloads: undefined,
         });
       }
     } catch (error) {
@@ -663,6 +776,15 @@ export default function App() {
           return;
         }
         formData.append("voice_code", manualVoiceCode);
+      }
+
+      if (isVideoApiV2Enabled()) {
+        const ctaTrim = v2Cta.trim();
+        if (ctaTrim) formData.append("cta", ctaTrim);
+        if (v2SafeZone) formData.append("safe_zone", v2SafeZone);
+        if (v2OutputFormat) formData.append("output_format", v2OutputFormat);
+        if (v2TextStyle) formData.append("text_style", v2TextStyle);
+        if (v2HookIntensity) formData.append("hook_intensity", v2HookIntensity);
       }
 
       if (shouldDebugGenerateFormData()) {
@@ -1426,6 +1548,92 @@ export default function App() {
                 <option value="capcut">CapCut</option>
               </select>
             </div>
+            {videoApiV2 && (
+              <>
+                <div className="md:col-span-2 border-t border-terracotta/10 pt-4 mt-1">
+                  <p className="text-xs font-semibold text-coffee/80 uppercase tracking-wider mb-1">
+                    {t.v2ApiOptionsTitle}
+                  </p>
+                  <p className="text-[11px] text-coffee/50 leading-snug">{t.v2ApiOptionsHint}</p>
+                </div>
+                <div className="md:col-span-2">
+                  <label htmlFor="v2_cta" className={fieldLabelClass}>
+                    {t.optCta}
+                  </label>
+                  <input
+                    id="v2_cta"
+                    type="text"
+                    value={v2Cta}
+                    onChange={(e) => setV2Cta(e.target.value.slice(0, 200))}
+                    placeholder={t.optCtaPlaceholder}
+                    className={nativeSelectClass}
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="v2_safe_zone" className={fieldLabelClass}>
+                    {t.optSafeZone}
+                  </label>
+                  <select
+                    id="v2_safe_zone"
+                    value={v2SafeZone}
+                    onChange={(e) => setV2SafeZone(e.target.value)}
+                    className={nativeSelectClass}
+                  >
+                    <option value="">{t.safeZoneDefault}</option>
+                    <option value="none">{t.safeZoneNone}</option>
+                    <option value="vertical_9_16">{t.safeZoneVertical}</option>
+                    <option value="square_1_1">{t.safeZoneSquare}</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="v2_output_format" className={fieldLabelClass}>
+                    {t.optOutputFormat}
+                  </label>
+                  <select
+                    id="v2_output_format"
+                    value={v2OutputFormat}
+                    onChange={(e) => setV2OutputFormat(e.target.value)}
+                    className={nativeSelectClass}
+                  >
+                    <option value="">{t.formatDefault}</option>
+                    <option value="mp4_vertical_9_16">{t.formatMp4169}</option>
+                    <option value="mp4_landscape_16_9">{t.formatMp4Landscape}</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="v2_text_style" className={fieldLabelClass}>
+                    {t.optTextStyle}
+                  </label>
+                  <select
+                    id="v2_text_style"
+                    value={v2TextStyle}
+                    onChange={(e) => setV2TextStyle(e.target.value)}
+                    className={nativeSelectClass}
+                  >
+                    <option value="">{t.textStyleDefault}</option>
+                    <option value="minimal">{t.textStyleMinimal}</option>
+                    <option value="bold_social">{t.textStyleBoldSocial}</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="v2_hook_intensity" className={fieldLabelClass}>
+                    {t.optHookIntensity}
+                  </label>
+                  <select
+                    id="v2_hook_intensity"
+                    value={v2HookIntensity}
+                    onChange={(e) => setV2HookIntensity(e.target.value)}
+                    className={nativeSelectClass}
+                  >
+                    <option value="">{t.hookDefault}</option>
+                    <option value="low">{t.hookLow}</option>
+                    <option value="medium">{t.hookMedium}</option>
+                    <option value="high">{t.hookHigh}</option>
+                  </select>
+                </div>
+              </>
+            )}
           </div>
         </details>
 
@@ -1483,63 +1691,95 @@ export default function App() {
                   <div
                     id="result"
                     ref={resultRef}
-                    className={jobProgress.download_url ? "ux-result-ready space-y-4" : "space-y-4"}
+                    className={
+                      jobProgress.download_url ||
+                      (jobProgress.outputDownloads && jobProgress.outputDownloads.length > 0)
+                        ? "ux-result-ready space-y-4"
+                        : "space-y-4"
+                    }
                   >
-                    {jobProgress.download_url && (
+                    {(jobProgress.download_url ||
+                      (jobProgress.outputDownloads && jobProgress.outputDownloads.length > 0)) && (
                       <>
-                        <div className="relative aspect-video rounded-xl overflow-hidden bg-black shadow-inner border border-terracotta/10">
-                          {videoBuffering && (
-                            <div className="ux-video-loader z-10">
-                              <Loader2 size={22} className="animate-spin text-terracotta" />
-                              <span>{t.videoPreparing}</span>
-                            </div>
-                          )}
-                          <video
-                            id="videoPlayer"
-                            ref={videoRef}
-                            src={jobProgress.download_url}
-                            controls
-                            playsInline
-                            className="relative z-[1] w-full h-full object-contain"
-                            poster="https://picsum.photos/seed/gourmet/800/450?blur=2"
-                            onLoadedData={() => {
-                              setVideoBuffering(false);
-                              const el = videoRef.current;
-                              if (!el) return;
-                              el.play().catch(() => setAutoplayHint(true));
-                            }}
-                            onPlaying={() => setAutoplayHint(false)}
-                          >
-                            {t.videoNotSupported}
-                          </video>
-                        </div>
-                        {autoplayHint && (
+                        {jobProgress.download_url && (
+                          <div className="relative aspect-video rounded-xl overflow-hidden bg-black shadow-inner border border-terracotta/10">
+                            {videoBuffering && (
+                              <div className="ux-video-loader z-10">
+                                <Loader2 size={22} className="animate-spin text-terracotta" />
+                                <span>{t.videoPreparing}</span>
+                              </div>
+                            )}
+                            <video
+                              id="videoPlayer"
+                              ref={videoRef}
+                              src={jobProgress.download_url}
+                              controls
+                              playsInline
+                              className="relative z-[1] w-full h-full object-contain"
+                              poster="https://picsum.photos/seed/gourmet/800/450?blur=2"
+                              onLoadedData={() => {
+                                setVideoBuffering(false);
+                                const el = videoRef.current;
+                                if (!el) return;
+                                el.play().catch(() => setAutoplayHint(true));
+                              }}
+                              onPlaying={() => setAutoplayHint(false)}
+                            >
+                              {t.videoNotSupported}
+                            </video>
+                          </div>
+                        )}
+                        {jobProgress.download_url && autoplayHint && (
                           <p className="text-xs text-center text-coffee/55">{t.autoplayBlocked}</p>
                         )}
 
-                        <div className="flex flex-wrap justify-center gap-3">
-                          <motion.a
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            href={jobProgress.download_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 px-6 py-2.5 bg-terracotta text-cream rounded-full text-sm font-medium hover:bg-coffee transition-colors shadow-lg shadow-terracotta/20 ring-2 ring-terracotta/20"
-                          >
-                            <Video size={16} />
-                            {t.fullScreen}
-                          </motion.a>
+                        {jobProgress.outputDownloads && jobProgress.outputDownloads.length > 1 && (
+                          <div className="flex flex-wrap justify-center gap-2">
+                            {jobProgress.outputDownloads.map((o) => (
+                              <motion.a
+                                key={o.key}
+                                initial={{ scale: 0.95, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                href={o.href}
+                                download={o.isVideo ? "video.mp4" : undefined}
+                                target={o.href.startsWith("blob:") ? undefined : "_blank"}
+                                rel={o.href.startsWith("blob:") ? undefined : "noopener noreferrer"}
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-cream text-coffee border border-terracotta/25 rounded-full text-xs font-medium hover:bg-white transition-colors"
+                              >
+                                <Download size={14} />
+                                {t.downloadVariant(o.label)}
+                              </motion.a>
+                            ))}
+                          </div>
+                        )}
 
-                          <motion.a
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            href={jobProgress.download_url}
-                            download="video.mp4"
-                            className="inline-flex items-center gap-2 px-7 py-2.5 bg-emerald-600 text-white rounded-full text-sm font-semibold hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-900/30 ring-2 ring-emerald-400/30"
-                          >
-                            <Download size={18} />
-                            {t.downloadCta}
-                          </motion.a>
+                        <div className="flex flex-wrap justify-center gap-3">
+                          {jobProgress.download_url && (
+                            <>
+                              <motion.a
+                                initial={{ scale: 0.9, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                href={jobProgress.download_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 px-6 py-2.5 bg-terracotta text-cream rounded-full text-sm font-medium hover:bg-coffee transition-colors shadow-lg shadow-terracotta/20 ring-2 ring-terracotta/20"
+                              >
+                                <Video size={16} />
+                                {t.fullScreen}
+                              </motion.a>
+
+                              <motion.a
+                                initial={{ scale: 0.9, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                href={jobProgress.download_url}
+                                download="video.mp4"
+                                className="inline-flex items-center gap-2 px-7 py-2.5 bg-emerald-600 text-white rounded-full text-sm font-semibold hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-900/30 ring-2 ring-emerald-400/30"
+                              >
+                                <Download size={18} />
+                                {t.downloadCta}
+                              </motion.a>
+                            </>
+                          )}
 
                           <button
                             type="button"
