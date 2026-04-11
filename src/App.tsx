@@ -784,6 +784,10 @@ export default function App() {
         formData.append("voice_code", manualVoiceCode);
       }
 
+      // output_formats toujours envoyé (indépendant du flag v2)
+      const fmtStr = Array.from(selectedFormats).join(",");
+      if (fmtStr) formData.append("output_formats", fmtStr);
+
       if (isVideoApiV2Enabled()) {
         const hasCtaBlock =
           !!ctaPhone.trim() ||
@@ -798,8 +802,6 @@ export default function App() {
         if (ctaLogoUrl.trim()) formData.append("cta_logo_url", ctaLogoUrl.trim());
         if (ctaLogoFile) formData.append("cta_logo", ctaLogoFile);
         if (safeZoneMode) formData.append("safe_zone_mode", safeZoneMode);
-        const fmtStr = Array.from(selectedFormats).join(",");
-        if (fmtStr) formData.append("output_formats", fmtStr);
         if (v2TextStyle) formData.append("text_style", v2TextStyle);
         if (v2HookIntensity) formData.append("hook_intensity", v2HookIntensity);
         formData.append("parallel_encoding", parallelEncoding ? "true" : "false");
@@ -1445,6 +1447,35 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {/* Formats de sortie — visible sans flag */}
+          <div className="mt-4 pt-4 border-t border-terracotta/10">
+            <Label icon={Video}>{t.optOutputFormats}</Label>
+            <p className="text-[11px] text-coffee/45 mb-3 leading-snug">{t.optOutputFormatsHint}</p>
+            <div className="flex flex-wrap gap-4">
+              {(["9:16", "1:1", "16:9"] as const).map((ratio) => {
+                const checked = selectedFormats.has(ratio);
+                return (
+                  <label key={ratio} className="inline-flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        setSelectedFormats((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(ratio)) next.delete(ratio);
+                          else next.add(ratio);
+                          return next;
+                        });
+                      }}
+                      className="rounded border-terracotta/40 text-terracotta focus:ring-terracotta/40"
+                    />
+                    <span className="text-sm font-medium text-coffee">{ratio}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
         </Card>
 
         <details className="group rounded-2xl border border-terracotta/15 bg-caramel shadow-xl overflow-hidden">
@@ -1690,33 +1721,6 @@ export default function App() {
                     <option value="standard">{t.safeZoneStandard}</option>
                     <option value="strict">{t.safeZoneStrict}</option>
                   </select>
-                </div>
-                <div className="md:col-span-2">
-                  <p className={fieldLabelClass}>{t.optOutputFormats}</p>
-                  <p className="text-[11px] text-coffee/45 mb-2">{t.optOutputFormatsHint}</p>
-                  <div className="flex flex-wrap gap-3">
-                    {(["9:16", "1:1", "16:9"] as const).map((ratio) => {
-                      const checked = selectedFormats.has(ratio);
-                      return (
-                        <label key={ratio} className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              setSelectedFormats((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(ratio)) next.delete(ratio);
-                                else next.add(ratio);
-                                return next;
-                              });
-                            }}
-                            className="rounded border-terracotta/40 text-terracotta focus:ring-terracotta/40"
-                          />
-                          <span className="text-sm text-coffee">{ratio}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
                 </div>
                 <div>
                   <label htmlFor="v2_text_style" className={fieldLabelClass}>
