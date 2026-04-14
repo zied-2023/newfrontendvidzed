@@ -303,7 +303,7 @@ export default function App() {
   const [ctaLogoUrl, setCtaLogoUrl] = useState("");
   const [ctaLogoFile, setCtaLogoFile] = useState<File | null>(null);
   const [safeZoneMode, setSafeZoneMode] = useState("");
-  const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set(["9:16"]));
+  const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set(["16:9"]));
   const [v2TextStyle, setV2TextStyle] = useState("");
   const [v2HookIntensity, setV2HookIntensity] = useState("");
   const [parallelEncoding, setParallelEncoding] = useState(false);
@@ -344,6 +344,7 @@ export default function App() {
   const audioInputRef = useRef<HTMLInputElement>(null);
   const ctaLogoInputRef = useRef<HTMLInputElement>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const completedWithoutOutputsSinceRef = useRef<number | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -520,6 +521,7 @@ export default function App() {
       }
       const dataRec = data as Record<string, unknown>;
       const outputDrafts = API_URL ? extractOutputsFromStatus(dataRec) : null;
+      const hasResolvedOutputs = Boolean(outputDrafts && outputDrafts.length > 0);
       // Ne considérer comme terminé QUE sur status="completed" ou présence de download_url.
       // Ne pas utiliser outputDrafts seul : les formats dérivés peuvent arriver en retard.
       const isCompleted =
@@ -532,6 +534,7 @@ export default function App() {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
         }
+        completedWithoutOutputsSinceRef.current = null;
         setIsGenerating(false);
         setStatus({ 
           type: 'error', 
@@ -546,6 +549,27 @@ export default function App() {
       }
 
       if (isCompleted) {
+        // Respecte le contrat backend multi-format: attendre un court délai pour recevoir `outputs`
+        // avant de tomber sur le fallback legacy /download/{jobId}.
+        if (!hasResolvedOutputs) {
+          const now = Date.now();
+          if (completedWithoutOutputsSinceRef.current == null) {
+            completedWithoutOutputsSinceRef.current = now;
+          }
+          const elapsed = now - completedWithoutOutputsSinceRef.current;
+          const WAIT_FOR_OUTPUTS_MS = 20000;
+          if (elapsed < WAIT_FOR_OUTPUTS_MS) {
+            setJobProgress({
+              status: "Finalisation des variantes (9:16, 1:1, 16:9)…",
+              download_url: undefined,
+              outputDownloads: undefined,
+            });
+            return;
+          }
+        } else {
+          completedWithoutOutputsSinceRef.current = null;
+        }
+
         if (pollIntervalRef.current) {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
@@ -564,17 +588,22 @@ export default function App() {
               href: r.href,
               isVideo: true,
             }));
+            const preferredFormat = Array.from(selectedFormats)[0];
+            const preferredOutput = preferredFormat
+              ? outputDownloads.find((o) => o.label === preferredFormat)
+              : undefined;
+            const primaryOutput = preferredOutput ?? outputDownloads[0];
 
             if (outputDownloads.length === 1) {
               setJobProgress({
                 status: statusLabel,
-                download_url: outputDownloads[0].href,
+                download_url: primaryOutput.href,
                 outputDownloads: undefined,
               });
             } else {
               setJobProgress({
                 status: statusLabel,
-                download_url: outputDownloads[0].href,
+                download_url: primaryOutput.href,
                 outputDownloads,
               });
             }
@@ -651,6 +680,7 @@ export default function App() {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    completedWithoutOutputsSinceRef.current = null;
     setIsGenerating(false);
     setActiveJobId(null);
     setJobProgress(null);
@@ -1418,15 +1448,11 @@ export default function App() {
                 return (
                   <label key={ratio} className="inline-flex items-center gap-2 cursor-pointer select-none">
                     <input
-                      type="checkbox"
+                      type="radio"
+                      name="output_format"
                       checked={checked}
                       onChange={() => {
-                        setSelectedFormats((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(ratio)) next.delete(ratio);
-                          else next.add(ratio);
-                          return next;
-                        });
+                        setSelectedFormats(new Set([ratio]));
                       }}
                       className="rounded border-terracotta/40 text-terracotta focus:ring-terracotta/40"
                     />
@@ -1837,6 +1863,7 @@ export default function App() {
                                 download={o.isVideo ? "video.mp4" : undefined}
                                 target={o.href.startsWith("blob:") ? undefined : "_blank"}
                                 rel={o.href.startsWith("blob:") ? undefined : "noopener noreferrer"}
+                                onClick={() => console.log(`Downloading format ${o.label}: ${o.href}`)}
                                 className="inline-flex items-center gap-2 px-4 py-2 bg-cream text-coffee border border-terracotta/25 rounded-full text-xs font-medium hover:bg-white transition-colors"
                               >
                                 <Download size={14} />
